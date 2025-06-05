@@ -7,12 +7,14 @@ from util import receber_json, enviar_json
 
 usuarios_ativos = {}
 
+
 def configurar_servidor(porta) -> socket:
     servSocket = socket(AF_INET, SOCK_STREAM)
     servSocket.bind(('', porta))
     servSocket.listen(5)
     print(f"Servidor ouvindo na porta {porta}...")
     return servSocket
+
 
 def deslogar_usuario(endereco):
     global usuarios_ativos
@@ -21,7 +23,7 @@ def deslogar_usuario(endereco):
             del usuarios_ativos[nome]
 
 
-def lidar_requisicao(conexao: socket, endereco, gerenciadorUsuarios:GerenciadorUsuarios):
+def lidar_requisicao(conexao: socket, endereco, gerenciadorUsuarios: GerenciadorUsuarios):
     print(f"Conexão iniciada com {endereco}")
     global usuarios_ativos
     try:
@@ -39,7 +41,8 @@ def lidar_requisicao(conexao: socket, endereco, gerenciadorUsuarios:GerenciadorU
                     senha = json_recebido.get('SENHA')
                     sucesso = gerenciadorUsuarios.login(nome, senha)
                     if sucesso:
-                        usuarios_ativos[nome] = {'ENDERECO': endereco, 'CONEXAO': conexao}
+                        usuarios_ativos[nome] = {
+                            'ENDERECO': endereco, 'CONEXAO': conexao}
                     status = "LOGIN_REALIZADO" if sucesso else "LOGIN_FALHOU"
                     enviar_json(conexao, {"STATUS": status})
                 case 'DESLOGAR':
@@ -53,7 +56,8 @@ def lidar_requisicao(conexao: socket, endereco, gerenciadorUsuarios:GerenciadorU
                     status = "CADASTRO_REALIZADO" if sucesso else "CADASTRO_FALHOU"
                     enviar_json(conexao, {"STATUS": status})
                 case 'LISTAR_PEERS':
-                    lista = [{"usuario": nome, "ip": info["ENDERECO"]} for nome, info in usuarios_ativos.items()]
+                    lista = [{"usuario": nome, "ip": info["ENDERECO"]}
+                             for nome, info in usuarios_ativos.items()]
                     enviar_json(conexao, {"STATUS": "OK", "PEERS": lista})
                 case _:
                     print(f"Comando desconhecido: {operacao}")
@@ -63,17 +67,21 @@ def lidar_requisicao(conexao: socket, endereco, gerenciadorUsuarios:GerenciadorU
         conexao.close()
         print(f"Conexão encerrada com {endereco}")
 
+
 def iniciar_servidor():
     servidor = configurar_servidor(12000)
     gerenciadorUsuarios = GerenciadorUsuarios()
 
     while True:
         conexao, endereco = servidor.accept()
-        thread = Thread(target=lidar_requisicao, args=(conexao, endereco, gerenciadorUsuarios))
+        thread = Thread(target=lidar_requisicao, args=(
+            conexao, endereco, gerenciadorUsuarios))
         thread.start()
+
 
 def main():
     iniciar_servidor()
+
 
 if __name__ == '__main__':
     main()

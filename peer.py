@@ -1,11 +1,14 @@
 import socket
 import json
+from util import criptografar_senha
+
 
 def enviar_json(sock, dados):
     try:
         sock.sendall(json.dumps(dados).encode())
     except Exception as e:
         print(f"[ERRO AO ENVIAR] {e}")
+
 
 def receber_json(sock):
     try:
@@ -14,6 +17,7 @@ def receber_json(sock):
     except Exception as e:
         print(f"[ERRO AO RECEBER] {e}")
         return None
+
 
 def conectar_servidor():
     try:
@@ -24,12 +28,14 @@ def conectar_servidor():
         print(f"[ERRO] Não foi possível conectar ao servidor: {e}")
         return None
 
+
 def montar_mensagem(cmd, usuario_logado):
     msg = {"CMD": cmd}
 
     if cmd in {"LOGIN", "CADASTRAR"}:
         msg["NOME"] = input("Nome de usuário: ").strip()
-        msg["SENHA"] = input("Senha: ").strip()
+        senha = input("Senha: ").strip()
+        msg["SENHA"] = criptografar_senha(senha)
     elif cmd == "DESLOGAR":
         if not usuario_logado:
             print("Você não está logado.")
@@ -43,6 +49,7 @@ def montar_mensagem(cmd, usuario_logado):
         return None
 
     return msg
+
 
 def processar_resposta(cmd, resposta, usuario_logado):
     if not resposta:
@@ -58,6 +65,7 @@ def processar_resposta(cmd, resposta, usuario_logado):
 
     return usuario_logado
 
+
 def main():
     cliente = conectar_servidor()
     if not cliente:
@@ -67,7 +75,8 @@ def main():
         usuario_logado = None
 
         while True:
-            cmd = input("\nComando (LOGIN, CADASTRAR, DESLOGAR, LISTAR_PEERS, SAIR): ").strip().upper()
+            cmd = input(
+                "\nComando (LOGIN, CADASTRAR, DESLOGAR, LISTAR_PEERS, SAIR): ").strip().upper()
             if cmd == "SAIR":
                 break
 
@@ -80,6 +89,7 @@ def main():
             usuario_logado = processar_resposta(cmd, resposta, usuario_logado)
 
         print("Encerrando conexão...")
+
 
 if __name__ == "__main__":
     main()
