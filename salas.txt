@@ -1,0 +1,1 @@
+{"NOME": "putaria", "MODERADOR": "gustavo", "SENHA": "5ab84f253965763fc0de1f37a25bfa71d726369591301df1e52fba22c00bc695"}
