@@ -56,7 +56,7 @@ def broadcast_atualizacao_sala(nome_sala):
             
             # Monta e envia a mensagem de atualização para o membro de destino
             if membro_destino in usuarios_ativos:
-                msg_atualizacao = {"TIPO": "ATUALIZACAO_SALA", "MEMBROS": outros_membros_info}
+                msg_atualizacao = {"TIPO": "ATUALIZACAO_SALA", "MEMBROS": outros_membros_info, "SALA": nome_sala}
                 enviar_json(usuarios_ativos[membro_destino]['CONEXAO'], msg_atualizacao)
 
 def lidar_requisicao(conexao: socket, endereco, gerenciadorUsuarios: GerenciadorUsuarios):
@@ -131,7 +131,7 @@ def lidar_requisicao(conexao: socket, endereco, gerenciadorUsuarios: Gerenciador
                         enviar_json(conexao, {"STATUS": "ERRO", "MENSAGEM": "Sala não encontrada."})
                         return
 
-                    if salas[nome_sala]["adm"] != adm:
+                    if salas[nome_sala]["moderador"] != adm:
                         enviar_json(conexao, {"STATUS": "ERRO", "MENSAGEM": "Apenas o administrador pode expulsar membros."})
                         return
 

@@ -91,7 +91,7 @@ def descriptografar_mensagem(payload_b64: str, chave_privada):
 # --- Variáveis de Estado Globais ---
 usuario_logado = None
 cliente_socket = None
-membros_sala_cache = {}
+cache_salas = {}
 
 # As variáveis de chave agora armazenarão a chave real
 chave_privada = None
@@ -114,7 +114,7 @@ def monitorar_historico(arquivo, parar_evento):
         print(f"[ERRO] Arquivo {arquivo} não encontrado.")
 
 def abrir_chat_sala(nome_sala: str):
-    global usuario_logado, membros_sala_cache, cliente_socket
+    global usuario_logado, cliente_socket
 
     pasta = f"chats/{usuario_logado}"
     arquivo = os.path.join(pasta, f"chat_grupo_{nome_sala}.txt")
@@ -166,7 +166,9 @@ def abrir_chat_sala(nome_sala: str):
             else:
                 print("Uso correto: /expulsar <usuario>")
         else:
-            for membro, chave in membros_sala_cache.items():
+            cache_sala_atual = cache_salas.get(nome_sala, {})
+            for membro, chave in cache_sala_atual.items():
+
                 if membro == usuario_logado:
                     continue
                 payload = criptografar_mensagem(entrada, chave)
@@ -296,10 +298,15 @@ def ouvinte_servidor():
             payload_decifrado = descriptografar_mensagem(resposta['PAYLOAD'], chave_privada)
             salvar_mensagem_grupo(resposta['SALA'], resposta['REMETENTE'], payload_decifrado)
         elif tipo_msg == "ATUALIZACAO_SALA":
-            membros_sala_cache.clear()
+            nome_sala = resposta["SALA"]
+            cache_salas[nome_sala] = {}
             for membro in resposta["MEMBROS"]:
-                membros_sala_cache[membro['usuario']] = membro['chave']
-            print(f"\n[INFO] Lista de membros da sala foi atualizada. Na sala com: {list(membros_sala_cache.keys())}")
+                cache_salas[nome_sala][membro['usuario']] = membro['chave']
+            print(f"\n[INFO] Lista de membros da sala {nome_sala} foi atualizada: {list(cache_salas[nome_sala].keys())}")
+        elif tipo_msg == "USUARIO_EXPULSO":
+            sala = resposta["SALA"]
+            cache_salas[nome_sala] = {} 
+            print(f"\n[INFO] O usuario {resposta["ALVO"]} foi expulso da sala {sala}.")
         elif status_msg:
             if status_msg == "LOGIN_REALIZADO":
                 usuario_logado = resposta.get("NOME")
@@ -356,7 +363,8 @@ def formatar_comando_deslogar(partes):
     if not usuario_logado: return None
     nome = usuario_logado
     usuario_logado = None
-    membros_sala_cache.clear()
+    nome_sala = partes[1]
+    cache_salas[nome_sala] = {} 
     return {"CMD": comando, "NOME": nome}
     
 
@@ -374,13 +382,15 @@ def formatar_comando_enviar_mensagem_sala(partes):
 
 def formatar_comando_criar_sala(partes):
     if len(partes) < 2: return None
-    membros_sala_cache.clear()
+    nome_sala = partes[1]
+    cache_salas[nome_sala] = {} 
     return {"CMD": "CRIAR_SALA", "SALA": partes[1]}
 
 def formatar_comando_entrar_sala(partes):
     if len(partes) < 2: return None
-    membros_sala_cache.clear()
-    return {"CMD": "ENTRAR_SALA", "SALA": partes[1]}
+    nome_sala = partes[1]
+    cache_salas[nome_sala] = {} 
+    return {"CMD": "ENTRAR_SALA", "SALA": nome_sala}
 
 def listar_chats():
     global usuario_logado
@@ -457,11 +467,26 @@ def main():
     thread_ouvinte.start()
 
     while True:
+        time.sleep(0.2)
         if not usuario_logado:
-            print("\n--- Menu Principal ---\nComandos: LOGIN, CADASTRAR, SAIR")
+            print("\n--- Menu Principal ---")
+            print("Comandos disponíveis:")
+            print(" - LOGIN")
+            print(" - CADASTRAR")
+            print(" - SAIR\n")
         elif usuario_logado:
-            print(f"\n--- Logado: {usuario_logado} ---\nComandos: LISTAR_CHATS, ABRIR_CHAT <nome_do_usuario>, LISTAR_PEERS, LISTAR_SALAS, MSG <user> <msg>, CRIAR_SALA <nome>, ENTRAR_SALA <nome>, DESLOGAR, SAIR")
-        
+            print(f"\n--- Logado como: {usuario_logado} ---")
+            print("Comandos disponíveis:")
+            print(" - LISTAR_PEERS           → Ver usuários online")
+            print(" - LISTAR_CHATS           → Ver seus chats salvos")
+            print(" - LISTAR_SALAS           → Ver salas existentes")
+            print(" - ABRIR_CHAT <usuario>   → Abrir chat direto com alguém")
+            print(" - ABRIR_CHAT_SALA <sala> → Abrir chat de uma sala")
+            print(" - MSG <usuario> <texto>  → Enviar mensagem direta")
+            print(" - CRIAR_SALA <nome>      → Criar uma nova sala")
+            print(" - ENTRAR_SALA <nome>     → Entrar em uma sala existente")
+            print(" - DESLOGAR               → Encerrar sua sessão")
+            print(" - SAIR                   → Sair do sistema\n")
         try:
             comando_input = input("> ").strip()
         except KeyboardInterrupt:
