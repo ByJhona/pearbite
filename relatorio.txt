@@ -1,0 +1,135 @@
+RELATÓRIO TÉCNICO - PEARBITE CHAT P2P
+
+1. ARQUITETURA DO SISTEMA
+
+O sistema PearBite possui 3 componentes principais:
+
+1.1 Servidor Tracker (tracker.py)
+- Mantém registro central de usuários e salas
+- Gerencia autenticação e descoberta de peers
+- Armazena chaves públicas dos usuários
+
+1.2 Cliente Peer (peer.py)
+- Interface com o usuário
+- Gerencia conexões P2P
+- Implementa criptografia ponta-a-ponta
+
+1.3 Módulos de Apoio:
+- gerenciadorUsuario.py: Gerencia usuários e salas
+- usuario.py: Define classes Usuario e Sala
+- util.py: Funções auxiliares de rede/criptografia
+
+2. FLUXO DE OPERAÇÃO
+
+2.1 Inicialização:
+- Servidor inicia na porta 12001
+- Cliente gera par de chaves RSA ao iniciar
+- Cliente conecta ao servidor
+
+2.2 Autenticação:
+[Diagrama: Client -> (login) -> Server -> (resposta) -> Client]
+
+2.3 Comunicação:
+- Mensagens são criptografadas com a chave pública do destinatário
+- Cada mensagem tem verificação de integridade via hash
+
+3. COMPONENTES PRINCIPAIS
+
+3.1 tracker.py
+- Funções principais:
+  * configurar_servidor(): Cria socket do servidor
+  * lidar_requisicao(): Processa comandos dos clientes
+  * broadcast_atualizacao_sala(): Notifica mudanças nas salas
+
+3.2 peer.py
+- Módulos críticos:
+  * ouvinte_servidor(): Thread que escuta respostas
+  * montar_mensagem(): Prepara comandos para envio
+  * criptografia: Implementa RSA com OAEP padding
+
+4. PROTOCOLO DE COMUNICAÇÃO
+
+4.1 Estrutura das Mensagens:
+{
+  "CMD": "COMANDO",
+  "DADOS": {...},
+  "HASH": "hash_de_verificação"
+}
+
+4.2 Sequência Típica:
+1. Cliente envia {"CMD":"LOGIN",...}
+2. Servidor responde {"STATUS":"LOGIN_REALIZADO",...}
+3. Cliente atualiza estado local
+
+5. MECANISMOS DE SEGURANÇA
+
+5.1 Autenticação:
+- Senhas armazenadas como SHA-256
+- Verificação de credenciais no servidor
+
+5.2 Criptografia:
+- RSA 2048 bits com padding OAEP
+- Chaves geradas no lado do cliente
+- Servidor apenas armazena chaves públicas
+
+5.3 Integridade:
+- Hash SHA-256 de cada mensagem
+- Verificação no receptor
+
+6. PERSISTÊNCIA DE DADOS
+
+6.1 Arquivos:
+- usuario.txt: Armazena usuários (nome + hash senha)
+- salas.txt: Armazena salas e moderadores
+
+6.2 Formato:
+Linhas em JSON, uma por registro:
+{"NOME":"user1","SENHA":"hash123"}
+
+7. LIMITAÇÕES CONHECIDAS
+
+7.1 Atuais:
+- Sem suporte a NAT traversal
+- Não persiste mensagens
+- Sem histórico de conversas
+
+7.2 Melhorias Planejadas:
+- Implementar WebSocket
+- Adicionar mensagens offline
+- Melhorar tratamento de erros
+
+8. EXEMPLO DE FLUXO
+
+8.1 Criação de Sala:
+1. Usuário envia CRIAR_SALA
+2. Servidor verifica permissões
+3. Cria entrada em salas.txt
+4. Retorna confirmação
+
+8.2 Mensagem P2P:
+1. Alice obtém chave pública de Bob
+2. Criptografa mensagem para Bob
+3. Envia via servidor
+4. Bob descriptografa localmente
+
+9. DEPENDÊNCIAS
+
+9.1 Bibliotecas Python:
+- cryptography
+- hashlib
+- json
+- socket
+- threading
+
+10. CONSIDERAÇÕES FINAIS
+
+O sistema implementa os requisitos básicos de um chat P2P seguro, com:
+- Descoberta centralizada
+- Comunicação descentralizada
+- Criptografia ponta-a-ponta
+- Controle de acesso
+
+Para expandir o sistema, recomenda-se:
+- Adicionar testes automatizados
+- Implementar reconexão automática
+- Melhorar interface do usuário

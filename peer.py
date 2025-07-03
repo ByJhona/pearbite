@@ -1,220 +1,13 @@
-"""
 import socket
 import json
-import threading
-from util import criptografar_senha
-
-# --- Variáveis de Estado Globais ---
-# Usadas para que a thread ouvinte possa alterar o estado que a thread principal lê
-usuario_logado = None
-sala_atual = None
-cliente_socket = None
-
-# --- PLACEHOLDER DE CRIPTOGRAFIA ---
-chave_privada = "CHAVE_PRIVADA_DE_EXEMPLO"
-chave_publica = "CHAVE_PUBLICA_DE_EXEMPLO"
-chaves_peers_cache = {}
-
-def gerar_par_chaves_placeholder():
-    print("[INFO] Par de chaves pública/privada gerado.")
-    pass
-
-def criptografar_placeholder(mensagem, chave_publica_dest):
-    return f"{mensagem} [cifrado com {chave_publica_dest[:10]}...]"
-
-def descriptografar_placeholder(payload, chave_privada_propria):
-    if "[cifrado com" in payload:
-        return payload.split(" [cifrado com")[0]
-    return payload
-
-# --- FIM DO PLACEHOLDER DE CRIPTOGRAFIA ---
-
-def enviar_json(sock, dados):
-    try:
-        sock.sendall(json.dumps(dados).encode())
-    except Exception as e:
-        print(f"[ERRO AO ENVIAR] {e}")
-
-def receber_json(sock):
-    try:
-        dados = sock.recv(2048)
-        return json.loads(dados.decode()) if dados else None
-    except Exception:
-        return None
-
-def ouvinte_servidor():
-    
-    #ÚNICA thread responsável por ouvir TODAS as mensagens do servidor.
-    #Ela processa tanto mensagens de chat quanto respostas de status.
-    
-    global usuario_logado, sala_atual, chaves_peers_cache
-
-    while True:
-        if not cliente_socket:
-            break
-        
-        resposta = receber_json(cliente_socket)
-        if not resposta:
-            print("\n[INFO] Desconectado do servidor. Pressione ENTER para sair.")
-            break
-
-        # Verifica se é uma mensagem de chat ou uma resposta de status
-        tipo_msg = resposta.get("TIPO")
-        status_msg = resposta.get("STATUS")
-
-        if tipo_msg == "MSG_DIRETA":
-            payload_decifrado = descriptografar_placeholder(resposta['PAYLOAD'], chave_privada)
-            print(f"\n[MSG de {resposta['REMETENTE']}]: {payload_decifrado}")
-        elif tipo_msg == "MSG_SALA":
-            payload_decifrado = descriptografar_placeholder(resposta['PAYLOAD'], chave_privada)
-            print(f"\n[SALA {resposta['SALA']} | {resposta['REMETENTE']}]: {payload_decifrado}")
-        elif status_msg:
-            # Processa respostas de status diretamente aqui
-            print(f"\n[SERVIDOR]: {json.dumps(resposta)}")
-            if status_msg == "LOGIN_REALIZADO":
-                usuario_logado = resposta.get("NOME")
-            elif status_msg in ["LOGIN_FALHOU", "CADASTRO_FALHOU"]:
-                # Nada a fazer, apenas informa o usuário
-                pass
-            elif status_msg == "OK" and "PEERS" in resposta:
-                print("\n--- Peers Ativos ---")
-                for peer in resposta["PEERS"]:
-                    print(f"- {peer['usuario']}")
-                    chaves_peers_cache[peer['usuario']] = peer['chave']
-                print("--------------------")
-            elif status_msg == "SALA_CRIADA" or status_msg == "ENTROU_NA_SALA":
-                sala_atual = resposta.get("SALA")
-            elif status_msg == "SAIU_DA_SALA":
-                print(f"Você saiu da sala: {sala_atual}")
-                sala_atual = None
-            elif status_msg == "OK" and "SALAS" in resposta:
-                salas_ativas = resposta["SALAS"]
-                print("\n--- Salas Ativas ---")
-                if not salas_ativas:
-                    print("Nenhuma sala ativa no momento.")
-                else:
-                    for sala in salas_ativas:
-                        print(f"- Sala: {sala['nome']} | Moderador: {sala['moderador']} | Membros: {sala['membros']}")
-                print("--------------------")
-        else:
-            # Resposta desconhecida
-             print(f"\n[SERVIDOR/DESCONHECIDO]: {json.dumps(resposta)}")
-
-
-def conectar_servidor():
-    try:
-        cliente = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        cliente.connect(('localhost', 12001))
-        return cliente
-    except Exception as e:
-        print(f"[ERRO] Não foi possível conectar ao servidor: {e}")
-        return None
-
-def montar_mensagem(cmd_completo: str):
-
-    global usuario_logado, sala_atual
-
-
-    partes = cmd_completo.split(" ")
-    cmd = partes[0].upper()
-    
-    msg = {"CMD": cmd}
-
-    # Lógica de montagem de mensagens (sem alterações significativas)
-    if cmd == "LOGIN" or cmd == "CADASTRAR":
-        msg["NOME"] = input("Nome de usuário: ").strip()
-        senha = input("Senha: ").strip()
-        msg["SENHA"] = criptografar_senha(senha)
-        if cmd == "LOGIN":
-            msg["CHAVE_PUBLICA"] = chave_publica
-    elif cmd == "DESLOGAR":
-        if not usuario_logado:
-            print("Você não está logado.")
-            return None
-        msg["NOME"] = usuario_logado
-        usuario_logado = None
-        sala_atual = None
-    elif cmd == "LISTAR_PEERS":
-        pass
-    elif cmd == "MSG":
-        if len(partes) < 3: return None
-        destinatario, texto = partes[1], " ".join(partes[2:])
-        if destinatario not in chaves_peers_cache:
-            print(f"Chave pública de {destinatario} não encontrada. Use LISTAR_PEERS.")
-            return None
-        payload_cifrado = criptografar_placeholder(texto, chaves_peers_cache[destinatario])
-        msg.update({"DESTINATARIO": destinatario, "PAYLOAD": payload_cifrado, "CMD": "ENVIAR_MSG"})
-    elif cmd in ["CRIAR_SALA", "ENTRAR_SALA"]:
-        if len(partes) < 2: return None
-        msg["SALA"] = partes[1]
-    elif cmd == "SAIR_SALA":
-        if not sala_atual: return None
-        msg["SALA"] = sala_atual
-    elif cmd == "SALA_MSG":
-        if not sala_atual: return None
-        if len(partes) < 2: return None
-        texto = " ".join(partes[1:])
-        payload_cifrado = criptografar_placeholder(texto, "CHAVE_DA_SALA_PLACEHOLDER")
-        msg.update({"SALA": sala_atual, "PAYLOAD": payload_cifrado, "CMD": "ENVIAR_MSG_SALA"})
-    elif cmd == "LISTAR_SALAS":
-        pass
-    else:
-        print("Comando inválido.")
-        return None
-
-    return msg
-
-def main():
-    global cliente_socket, usuario_logado, sala_atual
-    gerar_par_chaves_placeholder()
-
-    cliente_socket = conectar_servidor()
-    if not cliente_socket:
-        return
-    
-    # Inicia a thread para ouvir o servidor
-    thread_ouvinte = threading.Thread(target=ouvinte_servidor, daemon=True)
-    thread_ouvinte.start()
-
-    while True:
-        # A interface é atualizada com base nas variáveis globais que a thread ouvinte modifica
-        if not usuario_logado:
-            print("\n--- Menu Principal ---\nComandos: LOGIN, CADASTRAR, SAIR")
-        elif usuario_logado and not sala_atual:
-            print(f"\n--- Logado: {usuario_logado} ---\nComandos: LISTAR_PEERS, LISTAR_SALAS, MSG <user>, CRIAR_SALA <nome>, ENTRAR_SALA <nome>, DESLOGAR, SAIR")
-        elif usuario_logado and sala_atual:
-            print(f"\n--- Logado: {usuario_logado} | Sala: {sala_atual} ---\nComandos: SALA_MSG <msg>, SAIR_SALA, LISTAR_PEERS, LISTAR_SALAS, MSG <user>, DESLOGAR, SAIR")
-
-        try:
-            comando_input = input("> ").strip()
-        except KeyboardInterrupt: # Permite sair com Ctrl+C
-            break
-            
-        if not comando_input:
-            continue
-
-        cmd_base = comando_input.split(" ")[0].upper()
-        if cmd_base == "SAIR":
-            break
-
-        msg = montar_mensagem(comando_input)
-        if msg:
-            enviar_json(cliente_socket, msg)
-
-    print("\nEncerrando conexão...")
-    if usuario_logado: # Desloga antes de sair se a conexão ainda estiver ativa
-        enviar_json(cliente_socket, {"CMD": "DESLOGAR", "NOME": usuario_logado})
-    cliente_socket.close()
-
-if __name__ == "__main__":
-    main()
-"""
-
-import socket
-import json
+import sys
 import threading
 import base64 # Importado para codificar o ciphertext para envio em JSON
 from util import criptografar_senha
+import os
+from datetime import datetime
+import time
+
 
 # --- SEÇÃO DE CRIPTOGRAFIA REAL ---
 # A biblioteca 'cryptography' é usada para as operações.
@@ -297,7 +90,6 @@ def descriptografar_mensagem(payload_b64: str, chave_privada):
 
 # --- Variáveis de Estado Globais ---
 usuario_logado = None
-sala_atual = None
 cliente_socket = None
 membros_sala_cache = {}
 
@@ -306,6 +98,131 @@ chave_privada = None
 chave_publica = None
 chaves_peers_cache = {}
 
+
+
+def monitorar_historico(arquivo, parar_evento):
+    try:
+        with open(arquivo, "r", encoding="utf-8") as f:
+            f.seek(0, os.SEEK_END)
+            while not parar_evento.is_set():
+                linha = f.readline()
+                if linha:
+                    print(f"\n{linha.strip()}")
+                else:
+                    time.sleep(0.5)
+    except FileNotFoundError:
+        print(f"[ERRO] Arquivo {arquivo} não encontrado.")
+
+def abrir_chat_sala(nome_sala: str):
+    global usuario_logado, membros_sala_cache, cliente_socket
+
+    pasta = f"chats/{usuario_logado}"
+    arquivo = os.path.join(pasta, f"chat_grupo_{nome_sala}.txt")
+
+    print(f"\n📂 Abrindo sala: {nome_sala}\n")
+
+    if os.path.exists(arquivo):
+        with open(arquivo, "r", encoding="utf-8") as f:
+            print("--- Histórico ---")
+            print(f.read())
+            print("-----------------")
+    else:
+        print("Sem mensagens anteriores na sala.")
+
+    # Monitorar novas mensagens em background
+    parar_evento = threading.Event()
+    t = threading.Thread(target=monitorar_historico, args=(arquivo, parar_evento), daemon=True)
+    t.start()
+
+    print(f"\nDigite mensagens para a sala {nome_sala}. Use '/voltar' para voltar.")
+    while True:
+        time.sleep(0.5)
+        entrada = input(f"[Você → SALA {nome_sala}]: ").strip()
+        if entrada.upper() == "/VOLTAR":
+            parar_evento.set()
+            t.join()
+            break
+        elif entrada.upper() == "/SAIR":
+            acao = "SAIR_SALA"
+            enviar_json(cliente_socket, {
+                    "CMD": acao,
+                    "SALA": nome_sala
+                })
+            parar_evento.set()
+            t.join()
+            print("Você saiu da sala.")
+            break
+        elif entrada.startswith("/expulsar"):
+            partes = entrada.split()
+            if len(partes) == 2:
+                acao = "EXPULSAR_USUARIO"
+                usuario_alvo = partes[1]
+                enviar_json(cliente_socket, {
+                    "CMD": acao,
+                    "SALA": nome_sala,
+                    "ALVO": usuario_alvo,
+                    "ADM": usuario_logado
+                })
+            else:
+                print("Uso correto: /expulsar <usuario>")
+        else:
+            for membro, chave in membros_sala_cache.items():
+                if membro == usuario_logado:
+                    continue
+                payload = criptografar_mensagem(entrada, chave)
+                msg = {
+                    "CMD": "ENVIAR_MSG_SALA",
+                    "DESTINATARIO": membro,
+                    "PAYLOAD": payload,
+                    "SALA": nome_sala
+                }
+                enviar_json(cliente_socket, msg)
+            salvar_mensagem_grupo(nome_sala, usuario_logado, entrada)
+
+def abrir_chat(usuario_chat: str):
+    global usuario_logado, chaves_peers_cache, cliente_socket
+
+    pasta = f"chats/{usuario_logado}"
+    arquivo = os.path.join(pasta, f"chat_{usuario_chat}.txt")
+    parar_evento = threading.Event()
+    t = threading.Thread(target=monitorar_historico, args=(arquivo, parar_evento), daemon=True)
+    t.start()
+
+    print(f"\n📂 Abrindo conversa com {usuario_chat}...\n")
+
+    if os.path.exists(arquivo):
+        with open(arquivo, "r", encoding="utf-8") as f:
+            historico = f.read()
+            print("--- Histórico ---")
+            print(historico)
+            print("-----------------")
+    else:
+        print("Nenhum histórico salvo com esse usuário ainda.")
+
+    # Chat interativo
+    print(f"\nDigite mensagens para {usuario_chat}. Digite '/voltar' para voltar ao menu.")
+    while True:
+        time.sleep(0.5)
+        entrada = input(f"[Você → {usuario_chat}]: ").strip()
+        if entrada.upper() == "/voltar":
+            print("💨 Saindo do chat.")
+            parar_evento.set()
+            t.join()
+            break
+        if not entrada:
+            continue
+        if usuario_chat not in chaves_peers_cache:
+            print("⚠️ Chave pública do destinatário não encontrada. Use LISTAR_PEERS.")
+            continue
+        payload = criptografar_mensagem(entrada, chaves_peers_cache[usuario_chat])
+        if payload:
+            msg = {
+                "CMD": "ENVIAR_MSG",
+                "DESTINATARIO": usuario_chat,
+                "PAYLOAD": payload
+            }
+            enviar_json(cliente_socket, msg)
+            salvar_mensagem_direta(usuario_chat, usuario_logado, entrada)
 
 def enviar_json(sock, dados):
     try:
@@ -320,8 +237,43 @@ def receber_json(sock):
     except Exception:
         return None
 
+def criar_pasta_chat_usuario(usuario):
+    pasta = f"chats/{usuario}"
+    os.makedirs(pasta, exist_ok=True)
+    
+def salvar_mensagem_direta(destinatario: str, remetente: str, mensagem: str):
+    global usuario_logado
+
+    outro_usuario = destinatario if remetente == usuario_logado else remetente
+
+    nome_remetente = "Eu" if remetente == usuario_logado else remetente
+
+    pasta = f"chats/{usuario_logado}"
+    os.makedirs(pasta, exist_ok=True)
+
+    arquivo = os.path.join(pasta, f"chat_{outro_usuario}.txt")
+
+    agora = datetime.now().strftime("%Y-%m-%d %H:%M")
+    with open(arquivo, "a", encoding="utf-8") as f:
+        f.write(f"[{agora}] {nome_remetente}: {mensagem}\n")
+
+def salvar_mensagem_grupo(sala: str, remetente: str, mensagem: str):
+    global usuario_logado
+
+    nome_remetente = "Eu" if remetente == usuario_logado else remetente
+
+    pasta = f"chats/{usuario_logado}"
+    os.makedirs(pasta, exist_ok=True)
+
+    arquivo = os.path.join(pasta, f"chat_grupo_{sala}.txt")
+
+    agora = datetime.now().strftime("%Y-%m-%d %H:%M")
+    with open(arquivo, "a", encoding="utf-8") as f:
+        f.write(f"[{agora}] {nome_remetente}: {mensagem}\n")
+    
+    
 def ouvinte_servidor():
-    global usuario_logado, sala_atual, chaves_peers_cache
+    global usuario_logado, chaves_peers_cache
 
     while True:
         if not cliente_socket: break
@@ -333,38 +285,40 @@ def ouvinte_servidor():
 
         tipo_msg = resposta.get("TIPO")
         status_msg = resposta.get("STATUS")
+        remetente = resposta.get('REMETENTE')
 
         if tipo_msg == "MSG_DIRETA":
             # Usa a função de decifragem real
-            payload_decifrado = descriptografar_mensagem(resposta['PAYLOAD'], chave_privada)
-            print(f"\n[MSG de {resposta['REMETENTE']}]: {payload_decifrado}")
+            mensagem = descriptografar_mensagem(resposta['PAYLOAD'], chave_privada)
+            salvar_mensagem_direta(usuario_logado, remetente, mensagem)
         elif tipo_msg == "MSG_SALA":
             # Usa a função de decifragem real
             payload_decifrado = descriptografar_mensagem(resposta['PAYLOAD'], chave_privada)
-            print(f"\n[SALA {resposta['SALA']} | {resposta['REMETENTE']}]: {payload_decifrado}")
+            salvar_mensagem_grupo(resposta['SALA'], resposta['REMETENTE'], payload_decifrado)
         elif tipo_msg == "ATUALIZACAO_SALA":
             membros_sala_cache.clear()
             for membro in resposta["MEMBROS"]:
                 membros_sala_cache[membro['usuario']] = membro['chave']
             print(f"\n[INFO] Lista de membros da sala foi atualizada. Na sala com: {list(membros_sala_cache.keys())}")
         elif status_msg:
-            print(f"\n[SERVIDOR]: {json.dumps(resposta)}")
             if status_msg == "LOGIN_REALIZADO":
                 usuario_logado = resposta.get("NOME")
+            if status_msg == "CADASTRO_REALIZADO":
+                usuario_logado = resposta.get("NOME")
+                criar_pasta_chat_usuario(usuario_logado)
             elif status_msg == "OK" and "PEERS" in resposta:
                 print("\n--- Peers Ativos ---")
                 for peer in resposta["PEERS"]:
                     print(f"- {peer['usuario']}")
                     chaves_peers_cache[peer['usuario']] = peer['chave']
                 print("--------------------")
-            elif status_msg == "SALA_CRIADA" or status_msg == "ENTROU_NA_SALA":
-                sala_atual = resposta.get("SALA")
+            elif status_msg == "SALA_CRIADA" or  status_msg == "ENTROU_NA_SALA":
+                sala = resposta.get("SALA")
+                criar_chat_grupo(sala)
             elif status_msg == "SAIU_DA_SALA":
-                print(f"Você saiu da sala: {sala_atual}")
-                sala_atual = None
+                print("Você saiu da sala.")
         else:
              print(f"\n[SERVIDOR/DESCONHECIDO]: {json.dumps(resposta)}")
-
 
 def conectar_servidor():
     try:
@@ -375,72 +329,124 @@ def conectar_servidor():
         print(f"[ERRO] Não foi possível conectar ao servidor: {e}")
         return None
 
-def montar_mensagem(cmd_completo: str):
-    global usuario_logado, sala_atual, membros_sala_cache
+def formatar_comando_login_cadastro(partes):
+    comando = partes[0].upper()
+    nome = input("Nome de usuário: ").strip()
+    senha = input("Senha: ").strip()
+    senha_criptografada = criptografar_senha(senha)
+    if comando == "LOGIN":
+        return {"CMD":comando, "NOME": nome, "SENHA": senha_criptografada, "CHAVE_PUBLICA": chave_publica}
+    return {"CMD":comando, "NOME": nome, "SENHA": senha_criptografada}
 
-    partes = cmd_completo.split(" ")
-    cmd = partes[0].upper()
-    
-    msg = {"CMD": cmd}
-
-    if cmd == "LOGIN" or cmd == "CADASTRAR":
-        msg["NOME"] = input("Nome de usuário: ").strip()
-        senha = input("Senha: ").strip()
-        msg["SENHA"] = criptografar_senha(senha)
-        if cmd == "LOGIN":
-            msg["CHAVE_PUBLICA"] = chave_publica
-    elif cmd == "DESLOGAR":
-        if not usuario_logado: return None
-        msg["NOME"] = usuario_logado
-        usuario_logado = None
-        sala_atual = None
-        membros_sala_cache.clear()
-    elif cmd in ["LISTAR_PEERS", "LISTAR_SALAS"]:
-        pass
-    elif cmd == "MSG":
-        if len(partes) < 3: return None
-        destinatario, texto = partes[1], " ".join(partes[2:])
-        if destinatario not in chaves_peers_cache:
-            print(f"Chave de {destinatario} não encontrada. Use LISTAR_PEERS.")
-            return None
-        payload_cifrado = criptografar_mensagem(texto, chaves_peers_cache[destinatario])
-        if payload_cifrado:
-            msg.update({"DESTINATARIO": destinatario, "PAYLOAD": payload_cifrado, "CMD": "ENVIAR_MSG"})
-        else:
-            return None
-    elif cmd in ["CRIAR_SALA", "ENTRAR_SALA"]:
-        if len(partes) < 2: return None
-        membros_sala_cache.clear()
-        msg["SALA"] = partes[1]
-    elif cmd == "SAIR_SALA":
-        if not sala_atual: return None
-        msg["SALA"] = sala_atual
-        membros_sala_cache.clear()
-    elif cmd == "SALA_MSG":
-        if not sala_atual:
-            print("Você não está em nenhuma sala.")
-            return None
-        
-        texto = " ".join(partes[1:])
-        if not texto:
-            print("A mensagem não pode ser vazia.")
-            return None
-        
-        print(f"[Enviando para a sala: {list(membros_sala_cache.keys())}]")
-        for usuario, chave_publica_membro in membros_sala_cache.items():
-            payload_cifrado = criptografar_mensagem(texto, chave_publica_membro)
-            if payload_cifrado:
-                msg_individual = {"CMD": "ENVIAR_MSG", "DESTINATARIO": usuario, "PAYLOAD": payload_cifrado}
-                enviar_json(cliente_socket, msg_individual)
-        return None # Mensagens já foram enviadas
+def formatar_comando_enviar_mensagem(partes):
+    if len(partes) < 3: return None
+    destinatario, texto = partes[1], " ".join(partes[2:])
+    if destinatario not in chaves_peers_cache:
+        print(f"Chave de {destinatario} não encontrada. Use LISTAR_PEERS.")
+        return None
+    payload_cifrado = criptografar_mensagem(texto, chaves_peers_cache[destinatario])
+    if payload_cifrado:
+        return destinatario, texto,{"DESTINATARIO": destinatario, "PAYLOAD": payload_cifrado, "CMD": "ENVIAR_MSG"}
     else:
-        print("Comando inválido.")
         return None
 
-    return msg
+def formatar_comando_deslogar(partes):
+    global usuario_logado
+    comando = partes[0].upper()
+    if not usuario_logado: return None
+    nome = usuario_logado
+    usuario_logado = None
+    membros_sala_cache.clear()
+    return {"CMD": comando, "NOME": nome}
+    
+
+def formatar_comando_enviar_mensagem_sala(partes):
+    if len(partes) < 3: return None
+    destinatario, texto = partes[1], " ".join(partes[2:])
+    if destinatario not in chaves_peers_cache:
+        print(f"Chave de {destinatario} não encontrada. Use LISTAR_PEERS.")
+        return None
+    payload_cifrado = criptografar_mensagem(texto, chaves_peers_cache[destinatario])
+    if payload_cifrado:
+        return destinatario, texto,{"DESTINATARIO": destinatario, "PAYLOAD": payload_cifrado, "CMD": "ENVIAR_MSG_SALA"}
+    else:
+        return None
+
+def formatar_comando_criar_sala(partes):
+    if len(partes) < 2: return None
+    membros_sala_cache.clear()
+    return {"CMD": "CRIAR_SALA", "SALA": partes[1]}
+
+def formatar_comando_entrar_sala(partes):
+    if len(partes) < 2: return None
+    membros_sala_cache.clear()
+    return {"CMD": "ENTRAR_SALA", "SALA": partes[1]}
+
+def listar_chats():
+    global usuario_logado
+    pasta = f"chats/{usuario_logado}"
+
+    if os.path.exists(pasta):
+        arquivos = os.listdir(pasta)
+        if not arquivos:
+            print("📁 Nenhum chat salvo ainda.")
+        else:
+            for nome in arquivos:
+                print(f"- {nome}")
+    else:
+        print("📁 Nenhuma pasta salva ainda.")
+
+def criar_chat_grupo(sala):
+    global usuario_logado
+    pasta = f"chats/{usuario_logado}"
+    os.makedirs(pasta, exist_ok=True)
+    arquivo = os.path.join(pasta, f"chat_grupo_{sala}.txt")
+    
+    if not os.path.exists(arquivo):
+        with open(arquivo, "w", encoding="utf-8") as f:
+            pass
+
+def executar_comando(client_socket, cmd_completo):    
+    global usuario_logado, membros_sala_cache
+
+    partes = cmd_completo.split(" ")
+    comando = partes[0].upper()
+        
+    match comando:
+        case "LOGIN" | "CADASTRAR":
+            comando_cifrado = formatar_comando_login_cadastro(partes)
+            enviar_json(client_socket, comando_cifrado)
+        case "DESLOGAR":
+            comando = formatar_comando_deslogar(partes)
+            enviar_json(client_socket, comando)
+        case "LISTAR_PEERS":
+            enviar_json(client_socket, {"CMD": comando})
+        case "LISTAR_CHATS":
+            listar_chats()
+        case "MSG":
+            destinatario, mensagem, comando_cifrado = formatar_comando_enviar_mensagem(partes)
+            salvar_mensagem_direta(destinatario,usuario_logado, mensagem)
+            enviar_json(client_socket, comando_cifrado)
+        case "ABRIR_CHAT_SALA":
+            if len(partes) < 2:
+                print("Uso: ABRIR_CHAT_SALA <nome_da_sala>")
+            abrir_chat_sala(partes[1])
+        case "ABRIR_CHAT":
+            if len(partes) < 2:
+                print("Uso: ABRIR_CHAT <nome_do_usuario>")
+            else:
+                abrir_chat(partes[1])
+        case "CRIAR_SALA":
+            comando_sala = formatar_comando_criar_sala(partes)
+            enviar_json(cliente_socket, comando_sala)
+        case "ENTRAR_SALA":
+            comando_sala = formatar_comando_entrar_sala(partes)
+            enviar_json(cliente_socket, comando_sala)
+            
+
 
 def main():
-    global cliente_socket, usuario_logado, sala_atual, chave_privada, chave_publica
+    global cliente_socket, usuario_logado, chave_privada, chave_publica
     # Gera o par de chaves real na inicialização
     chave_privada, chave_publica = gerar_par_chaves()
 
@@ -453,11 +459,9 @@ def main():
     while True:
         if not usuario_logado:
             print("\n--- Menu Principal ---\nComandos: LOGIN, CADASTRAR, SAIR")
-        elif usuario_logado and not sala_atual:
-            print(f"\n--- Logado: {usuario_logado} ---\nComandos: LISTAR_PEERS, LISTAR_SALAS, MSG <user> <msg>, CRIAR_SALA <nome>, ENTRAR_SALA <nome>, DESLOGAR, SAIR")
-        elif usuario_logado and sala_atual:
-            print(f"\n--- Logado: {usuario_logado} | Sala: {sala_atual} ---\nComandos: SALA_MSG <msg>, SAIR_SALA, LISTAR_PEERS, LISTAR_SALAS, MSG <user> <msg>, DESLOGAR, SAIR")
-
+        elif usuario_logado:
+            print(f"\n--- Logado: {usuario_logado} ---\nComandos: LISTAR_CHATS, ABRIR_CHAT <nome_do_usuario>, LISTAR_PEERS, LISTAR_SALAS, MSG <user> <msg>, CRIAR_SALA <nome>, ENTRAR_SALA <nome>, DESLOGAR, SAIR")
+        
         try:
             comando_input = input("> ").strip()
         except KeyboardInterrupt:
@@ -467,9 +471,7 @@ def main():
         cmd_base = comando_input.split(" ")[0].upper()
         if cmd_base == "SAIR": break
 
-        msg = montar_mensagem(comando_input)
-        if msg:
-            enviar_json(cliente_socket, msg)
+        executar_comando(cliente_socket, comando_input)
 
     print("\nEncerrando conexão...")
     if usuario_logado:
