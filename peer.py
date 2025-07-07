@@ -312,8 +312,11 @@ def ouvinte_servidor():
                 print(f'\n[INFO] {resposta.get("MENSAGEM", "Expulso da sala.")}.')
             case "ERRO":
                 print(f'\n[ERRO] {resposta.get("MENSAGEM", "Erro desconhecido.")}')
+            
+            case "CADASTRO_REALIZADO":
+                print("Cadastro Realizado.")
 
-            case "LOGIN_REALIZADO" | "CADASTRO_REALIZADO":
+            case "LOGIN_REALIZADO":
                 usuario_logado = resposta.get("NOME")
                 criar_pasta_chat_usuario(usuario_logado)
 

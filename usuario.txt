@@ -1,3 +1,0 @@
-{"NOME": "tales", "SENHA": "6baad6f126fa53233f5120dd32225d4a9eeaea26dce58789f0b3b6efcdb0dadb"}
-{"NOME": "jose", "SENHA": "6baad6f126fa53233f5120dd32225d4a9eeaea26dce58789f0b3b6efcdb0dadb"}
-{"NOME": "jhon", "SENHA": "6baad6f126fa53233f5120dd32225d4a9eeaea26dce58789f0b3b6efcdb0dadb"}
