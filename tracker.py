@@ -56,7 +56,7 @@ def broadcast_atualizacao_sala(nome_sala):
             
             # Monta e envia a mensagem de atualização para o membro de destino
             if membro_destino in usuarios_ativos:
-                msg_atualizacao = {"TIPO": "ATUALIZACAO_SALA", "MEMBROS": outros_membros_info, "SALA": nome_sala}
+                msg_atualizacao = {"STATUS": "ATUALIZACAO_SALA", "MEMBROS": outros_membros_info, "SALA": nome_sala}
                 enviar_json(usuarios_ativos[membro_destino]['CONEXAO'], msg_atualizacao)
 
 def lidar_requisicao(conexao: socket, endereco, gerenciadorUsuarios: GerenciadorUsuarios):
@@ -105,13 +105,13 @@ def lidar_requisicao(conexao: socket, endereco, gerenciadorUsuarios: Gerenciador
                     if not usuario_logado: continue
                     destinatario, payload = json_recebido.get('DESTINATARIO'), json_recebido.get('PAYLOAD')
                     if destinatario in usuarios_ativos:
-                        msg = {"TIPO": "MSG_DIRETA", "REMETENTE": usuario_logado, "PAYLOAD": payload}
+                        msg = {"STATUS": "MSG_DIRETA", "REMETENTE": usuario_logado, "PAYLOAD": payload}
                         enviar_json(usuarios_ativos[destinatario]['CONEXAO'], msg)
                 case 'ENVIAR_MSG_SALA':
                     if not usuario_logado: continue
                     destinatario, payload,sala = json_recebido.get('DESTINATARIO'), json_recebido.get('PAYLOAD'),json_recebido.get('SALA')
                     if destinatario in usuarios_ativos:
-                        msg = {"TIPO": "MSG_SALA", "REMETENTE": usuario_logado, "PAYLOAD": payload, "SALA":sala}
+                        msg = {"STATUS": "MSG_SALA", "REMETENTE": usuario_logado, "PAYLOAD": payload, "SALA":sala}
                         enviar_json(usuarios_ativos[destinatario]['CONEXAO'], msg)
                 case 'CRIAR_SALA':
                     if not usuario_logado: continue
@@ -125,22 +125,34 @@ def lidar_requisicao(conexao: socket, endereco, gerenciadorUsuarios: Gerenciador
                 case "EXPULSAR_USUARIO":
                     nome_sala = json_recebido.get("SALA")
                     usuario_alvo = json_recebido.get("ALVO")
-                    adm = json_recebido.get("ADM")
 
                     if nome_sala not in salas:
                         enviar_json(conexao, {"STATUS": "ERRO", "MENSAGEM": "Sala não encontrada."})
-                        return
 
-                    if salas[nome_sala]["moderador"] != adm:
+                    elif salas[nome_sala]["moderador"] != nome_usuario_thread:
                         enviar_json(conexao, {"STATUS": "ERRO", "MENSAGEM": "Apenas o administrador pode expulsar membros."})
-                        return
 
-                    if usuario_alvo in salas[nome_sala]["membros"]:
+                    elif usuario_alvo in salas[nome_sala]["membros"]:
                         salas[nome_sala]["membros"].remove(usuario_alvo)
-                        enviar_json(conexao, {"STATUS": "USUARIO_EXPULSO","SALA": nome_sala,"ALVO": usuario_alvo})
+                        if usuario_alvo in usuarios_ativos:
+                            enviar_json(usuarios_ativos[usuario_alvo]["CONEXAO"], {
+                                "STATUS": "EXPULSO",
+                                "SALA": nome_sala,
+                                "MENSAGEM": f"Você foi expulso da sala {nome_sala}."
+                            })
+                        for membro in salas[nome_sala]["membros"]:
+                            if membro != usuario_alvo and membro in usuarios_ativos:
+                                enviar_json(usuarios_ativos[membro]["CONEXAO"], {
+                                    "STATUS": "USUARIO_EXPULSO",
+                                    "SALA": nome_sala,
+                                    "ALVO": usuario_alvo
+                                })
+
                         broadcast_atualizacao_sala(nome_sala)
+
                     else:
                         enviar_json(conexao, {"STATUS": "ERRO", "MENSAGEM": "Usuário não está na sala."})
+
 
                 case 'ENTRAR_SALA':
                     if not usuario_logado: continue

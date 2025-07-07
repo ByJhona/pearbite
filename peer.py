@@ -14,6 +14,17 @@ import time
 from cryptography.hazmat.primitives.asymmetric import rsa, padding
 from cryptography.hazmat.primitives import hashes, serialization
 
+# --- Variáveis de Estado Globais ---
+usuario_logado = None
+cliente_socket = None
+cache_salas = {}
+
+# As variáveis de chave agora armazenarão a chave real
+chave_privada = None
+chave_publica = None
+chaves_peers_cache = {}
+
+
 def gerar_par_chaves():
     """
     Gera um par de chaves RSA (privada e pública).
@@ -87,19 +98,6 @@ def descriptografar_mensagem(payload_b64: str, chave_privada):
 
 # --- FIM DA SEÇÃO DE CRIPTOGRAFIA ---
 
-
-# --- Variáveis de Estado Globais ---
-usuario_logado = None
-cliente_socket = None
-cache_salas = {}
-
-# As variáveis de chave agora armazenarão a chave real
-chave_privada = None
-chave_publica = None
-chaves_peers_cache = {}
-
-
-
 def monitorar_historico(arquivo, parar_evento):
     try:
         with open(arquivo, "r", encoding="utf-8") as f:
@@ -161,7 +159,6 @@ def abrir_chat_sala(nome_sala: str):
                     "CMD": acao,
                     "SALA": nome_sala,
                     "ALVO": usuario_alvo,
-                    "ADM": usuario_logado
                 })
             else:
                 print("Uso correto: /expulsar <usuario>")
@@ -206,7 +203,7 @@ def abrir_chat(usuario_chat: str):
     while True:
         time.sleep(0.5)
         entrada = input(f"[Você → {usuario_chat}]: ").strip()
-        if entrada.upper() == "/voltar":
+        if entrada.upper() == "/VOLTAR":
             print("💨 Saindo do chat.")
             parar_evento.set()
             t.join()
@@ -278,54 +275,64 @@ def ouvinte_servidor():
     global usuario_logado, chaves_peers_cache
 
     while True:
-        if not cliente_socket: break
-        
+        if not cliente_socket:
+            break
+
         resposta = receber_json(cliente_socket)
         if not resposta:
             print("\n[INFO] Desconectado do servidor. Pressione ENTER para sair.")
             break
 
-        tipo_msg = resposta.get("TIPO")
-        status_msg = resposta.get("STATUS")
-        remetente = resposta.get('REMETENTE')
+        status = resposta.get("STATUS")
+        remetente = resposta.get("REMETENTE")
 
-        if tipo_msg == "MSG_DIRETA":
-            # Usa a função de decifragem real
-            mensagem = descriptografar_mensagem(resposta['PAYLOAD'], chave_privada)
-            salvar_mensagem_direta(usuario_logado, remetente, mensagem)
-        elif tipo_msg == "MSG_SALA":
-            # Usa a função de decifragem real
-            payload_decifrado = descriptografar_mensagem(resposta['PAYLOAD'], chave_privada)
-            salvar_mensagem_grupo(resposta['SALA'], resposta['REMETENTE'], payload_decifrado)
-        elif tipo_msg == "ATUALIZACAO_SALA":
-            nome_sala = resposta["SALA"]
-            cache_salas[nome_sala] = {}
-            for membro in resposta["MEMBROS"]:
-                cache_salas[nome_sala][membro['usuario']] = membro['chave']
-            print(f"\n[INFO] Lista de membros da sala {nome_sala} foi atualizada: {list(cache_salas[nome_sala].keys())}")
-        elif tipo_msg == "USUARIO_EXPULSO":
-            sala = resposta["SALA"]
-            cache_salas[nome_sala] = {} 
-            print(f"\n[INFO] O usuario {resposta["ALVO"]} foi expulso da sala {sala}.")
-        elif status_msg:
-            if status_msg == "LOGIN_REALIZADO":
-                usuario_logado = resposta.get("NOME")
-            if status_msg == "CADASTRO_REALIZADO":
+        match status:
+            case "MSG_DIRETA":
+                mensagem = descriptografar_mensagem(resposta["PAYLOAD"], chave_privada)
+                salvar_mensagem_direta(usuario_logado, remetente, mensagem)
+
+            case "MSG_SALA":
+                mensagem = descriptografar_mensagem(resposta["PAYLOAD"], chave_privada)
+                salvar_mensagem_grupo(resposta["SALA"], remetente, mensagem)
+
+            case "ATUALIZACAO_SALA":
+                nome_sala = resposta["SALA"]
+                cache_salas[nome_sala] = {
+                    membro["usuario"]: membro["chave"]
+                    for membro in resposta["MEMBROS"]
+                }
+                membros = list(cache_salas[nome_sala].keys())
+                print(f"\n[INFO] Lista de membros da sala {nome_sala} foi atualizada: {membros}")
+
+            case "USUARIO_EXPULSO":
+                print(f'\n[INFO] O usuário {resposta["ALVO"]} foi expulso da sala.')
+            case "EXPULSO":
+                sala = resposta["SALA"]
+                cache_salas[sala] = {}  # Limpa o cache da sala
+                print(f'\n[INFO] {resposta.get("MENSAGEM", "Expulso da sala.")}.')
+            case "ERRO":
+                print(f'\n[ERRO] {resposta.get("MENSAGEM", "Erro desconhecido.")}')
+
+            case "LOGIN_REALIZADO" | "CADASTRO_REALIZADO":
                 usuario_logado = resposta.get("NOME")
                 criar_pasta_chat_usuario(usuario_logado)
-            elif status_msg == "OK" and "PEERS" in resposta:
+
+            case "OK" if "PEERS" in resposta:
                 print("\n--- Peers Ativos ---")
                 for peer in resposta["PEERS"]:
                     print(f"- {peer['usuario']}")
-                    chaves_peers_cache[peer['usuario']] = peer['chave']
+                    chaves_peers_cache[peer["usuario"]] = peer["chave"]
                 print("--------------------")
-            elif status_msg == "SALA_CRIADA" or  status_msg == "ENTROU_NA_SALA":
-                sala = resposta.get("SALA")
-                criar_chat_grupo(sala)
-            elif status_msg == "SAIU_DA_SALA":
+
+            case "SALA_CRIADA" | "ENTROU_NA_SALA":
+                criar_chat_grupo(resposta["SALA"])
+
+            case "SAIU_DA_SALA":
                 print("Você saiu da sala.")
-        else:
-             print(f"\n[SERVIDOR/DESCONHECIDO]: {json.dumps(resposta)}")
+
+            case _:
+                print(f"\n[SERVIDOR/DESCONHECIDO]: {json.dumps(resposta)}")
+
 
 def conectar_servidor():
     try:
@@ -363,8 +370,6 @@ def formatar_comando_deslogar(partes):
     if not usuario_logado: return None
     nome = usuario_logado
     usuario_logado = None
-    nome_sala = partes[1]
-    cache_salas[nome_sala] = {} 
     return {"CMD": comando, "NOME": nome}
     
 
@@ -479,7 +484,6 @@ def main():
             print("Comandos disponíveis:")
             print(" - LISTAR_PEERS           → Ver usuários online")
             print(" - LISTAR_CHATS           → Ver seus chats salvos")
-            print(" - LISTAR_SALAS           → Ver salas existentes")
             print(" - ABRIR_CHAT <usuario>   → Abrir chat direto com alguém")
             print(" - ABRIR_CHAT_SALA <sala> → Abrir chat de uma sala")
             print(" - MSG <usuario> <texto>  → Enviar mensagem direta")
