@@ -36,7 +36,6 @@ def deslogar_usuario(endereco):
                 if not membros:
                     del salas[nome_sala]
                 else:
-                    # Notifica outros membros que o usuário saiu (opcional)
                     pass
 
 
@@ -87,7 +86,9 @@ def lidar_requisicao(conexao: socket, endereco,gerenciadorUsuarios: GerenciadorU
                         enviar_json(conexao, {"STATUS": "LOGIN_FALHOU"})
                 
                 case 'DESLOGAR':
-                    if json_recebido.get('NOME') in usuarios_ativos: break
+                    nome = json_recebido.get('NOME')
+                    if nome in usuarios_ativos:
+                        del usuarios_ativos[nome]
 
                 case 'CADASTRAR':
                     nome_cript_peer, senha_cript_peer = json_recebido.get('NOME'), json_recebido.get('SENHA')

@@ -60,7 +60,7 @@ def abrir_chat_sala(nome_sala: str):
     t = threading.Thread(target=monitorar_historico, args=(caminho_arquivo, parar_evento), daemon=True)
     t.start()
 
-    print(f"\nDigite mensagens para a sala {nome_sala}. Use '/voltar' para voltar.")
+    print(f"\nDigite mensagens para a sala {nome_sala}. Use '/voltar', '/expulsar <usuario>'.")
     while True:
         entrada = input(f"[Você → SALA {nome_sala}]: ").strip()
         if entrada.upper() == "/VOLTAR":
@@ -123,7 +123,7 @@ def abrir_chat(usuario_chat: str):
     exibir_historico(caminho_arquivo)
 
     # Chat interativo
-    print(f"\nDigite mensagens para {usuario_chat}. Digite '/voltar' para voltar ao menu.")
+    print(f"\nDigite mensagens para {usuario_chat}. Digite '/voltar' para voltar ao menu ou '/sair' para sair da sala.")
     while True:
         time.sleep(0.5)
         entrada = input(f"[Você → {usuario_chat}]: ").strip()
@@ -383,6 +383,8 @@ def executar_comando(client_socket, cmd_completo):
         case "ENTRAR_SALA":
             comando_sala = formatar_comando_entrar_sala(comando)
             enviar_json(cliente_socket, comando_sala)
+        case _:
+            print(f"Comando desconhecido: {comando}")
             
 def main():
     global cliente_socket, usuario_logado, chave_privada, chave_publica
@@ -396,7 +398,6 @@ def main():
     thread_ouvinte.start()
 
     while True:
-        time.sleep(0.2)
         if not usuario_logado:
             print("\n--- Menu Principal ---")
             print("Comandos disponíveis:")
@@ -407,12 +408,12 @@ def main():
             print(f"\n--- Logado como: {usuario_logado} ---")
             print("Comandos disponíveis:")
             print(" - LISTAR_PEERS              → Ver usuários online")
+            print(" - MSG <usuario> <texto>     → Enviar mensagem direta")
             print(" - LISTAR_CHATS              → Ver seus chats salvos")
             print(" - ABRIR_CHAT <usuario>      → Abrir chat direto com alguém")
-            print(" - ABRIR_CHAT_SALA <sala>    → Abrir chat de uma sala")
-            print(" - MSG <usuario> <texto>     → Enviar mensagem direta")
             print(" - CRIAR_SALA                → Criar uma nova sala")
             print(" - ENTRAR_SALA               → Entrar em uma sala existente")
+            print(" - ABRIR_CHAT_SALA <sala>    → Abrir chat de uma sala")
             print(" - DESLOGAR                  → Encerrar sua sessão")
             print(" - SAIR                      → Sair do sistema\n")
         try:
@@ -425,7 +426,7 @@ def main():
         if cmd_base == "SAIR": break
 
         executar_comando(cliente_socket, comando_input)
-
+        time.sleep(0.5)
     print("\nEncerrando conexão...")
     if usuario_logado:
         enviar_json(cliente_socket, {"CMD": "DESLOGAR", "NOME": usuario_logado})
