@@ -122,13 +122,13 @@ def lidar_requisicao(conexao: socket, endereco,gerenciadorUsuarios: GerenciadorU
                 case 'CRIAR_SALA':
                     if not usuario_logado: continue
                     nome_sala = json_recebido.get('SALA')
-                    senha_sala = json_recebido.get('SENHA')
+                    senha_descript = descriptografar_mensagem(json_recebido.get('SENHA', ""), chave_privada)
                     if nome_sala in salas:
                         enviar_json(conexao, {"STATUS": "ERRO", "MENSAGEM": "Sala já existe."})
                     else:
-                        salas[nome_sala] = {"membros": [usuario_logado], "moderador": usuario_logado}
+                        salas[nome_sala] = {"membros": [usuario_logado], "moderador": usuario_logado, "SENHA": senha_descript, "BANIDOS": []}
                         enviar_json(conexao, {"STATUS": "SALA_CRIADA", "SALA": nome_sala})
-                        broadcast_atualizacao_sala(nome_sala)
+                        #broadcast_atualizacao_sala(nome_sala)
                 case "EXPULSAR_USUARIO":
                     nome_sala = json_recebido.get("SALA")
                     usuario_alvo = json_recebido.get("ALVO")
@@ -140,13 +140,17 @@ def lidar_requisicao(conexao: socket, endereco,gerenciadorUsuarios: GerenciadorU
                         enviar_json(conexao, {"STATUS": "ERRO", "MENSAGEM": "Apenas o administrador pode expulsar membros."})
 
                     elif usuario_alvo in salas[nome_sala]["membros"]:
-                        salas[nome_sala]["membros"].remove(usuario_alvo)
                         if usuario_alvo in usuarios_ativos:
+                            salas[nome_sala]["membros"].remove(usuario_alvo)
                             enviar_json(usuarios_ativos[usuario_alvo]["CONEXAO"], {
                                 "STATUS": "EXPULSO",
                                 "SALA": nome_sala,
                                 "MENSAGEM": f"Você foi expulso da sala {nome_sala}."
                             })
+                            if usuario_alvo not in salas[nome_sala]["BANIDOS"]:
+                                salas[nome_sala]["BANIDOS"].append(usuario_alvo)
+                                print(f"[SERVIDOR] Usuário {usuario_alvo} foi adicionado à blacklist da sala {nome_sala}.")         
+
                         for membro in salas[nome_sala]["membros"]:
                             if membro != usuario_alvo and membro in usuarios_ativos:
                                 enviar_json(usuarios_ativos[membro]["CONEXAO"], {
@@ -160,16 +164,16 @@ def lidar_requisicao(conexao: socket, endereco,gerenciadorUsuarios: GerenciadorU
                     else:
                         enviar_json(conexao, {"STATUS": "ERRO", "MENSAGEM": "Usuário não está na sala."})
 
-
                 case 'ENTRAR_SALA':
                     if not usuario_logado: continue
                     nome_sala = json_recebido.get('SALA')
-                    if nome_sala in salas:
+                    senha_descript = descriptografar_mensagem(json_recebido.get("SENHA"), chave_privada)
+                    if nome_sala in salas and senha_descript ==  salas[nome_sala].get("SENHA", "") and usuario_logado not in salas[nome_sala]["BANIDOS"]:
                         salas[nome_sala]["membros"].append(usuario_logado)
                         enviar_json(conexao, {"STATUS": "ENTROU_NA_SALA", "SALA": nome_sala})
                         broadcast_atualizacao_sala(nome_sala)
                     else:
-                         enviar_json(conexao, {"STATUS": "ERRO", "MENSAGEM": "Sala não existe."})
+                         enviar_json(conexao, {"STATUS": "ERRO", "MENSAGEM": "Erro ao entrar na sala."})
 
                 case 'SAIR_SALA':
                     if not usuario_logado: continue

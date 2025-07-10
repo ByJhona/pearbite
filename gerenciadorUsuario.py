@@ -42,9 +42,6 @@ class GerenciadorUsuarios:
                 except json.JSONDecodeError as e:
                     print(f"[ERRO JSON] Linha inválida: {linha} - {e}")
                     continue
-                print(dados.get('NOME'))
-                print(nome)
-                print(dados.get('SENHA'))
                 if dados.get('NOME') == nome:
                     senha_hash = dados.get('SENHA', "")
                     if senha_hash and bcrypt.checkpw(senha_digitada.encode('utf-8'), senha_hash.encode('utf-8')):

@@ -12,6 +12,8 @@ import time
 usuario_logado = None
 cliente_socket = None
 cache_salas = {}
+sala_atual = None
+chat_atual = None
 
 # As variáveis de chave agora armazenarão a chave real
 chave_privada = None
@@ -34,34 +36,37 @@ def monitorar_historico(arquivo, parar_evento):
     except FileNotFoundError:
         print(f"[ERRO] Arquivo {arquivo} não encontrado.")
 
-def abrir_chat_sala(nome_sala: str):
-    global usuario_logado, cliente_socket
-
-    pasta = f"chats/{usuario_logado}"
-    arquivo = os.path.join(pasta, f"chat_grupo_{nome_sala}.txt")
-
-    print(f"\n📂 Abrindo sala: {nome_sala}\n")
-
-    if os.path.exists(arquivo):
-        with open(arquivo, "r", encoding="utf-8") as f:
+def exibir_historico(caminho_arquivo):
+    if os.path.exists(caminho_arquivo):
+        with open(caminho_arquivo, "r", encoding="utf-8") as f:
             print("--- Histórico ---")
             print(f.read())
             print("-----------------")
     else:
-        print("Sem mensagens anteriores na sala.")
+        print("📭 Sem mensagens anteriores.")
+
+def abrir_chat_sala(nome_sala: str):
+    global usuario_logado, cliente_socket,sala_atual
+    sala_atual = nome_sala
+    pasta = f"chats/{usuario_logado}"
+    caminho_arquivo = os.path.join(pasta, f"chat_grupo_{nome_sala}.txt")
+
+    print(f"\n📂 Abrindo sala: {nome_sala}\n")
+
+    exibir_historico(caminho_arquivo)
 
     # Monitorar novas mensagens em background
     parar_evento = threading.Event()
-    t = threading.Thread(target=monitorar_historico, args=(arquivo, parar_evento), daemon=True)
+    t = threading.Thread(target=monitorar_historico, args=(caminho_arquivo, parar_evento), daemon=True)
     t.start()
 
     print(f"\nDigite mensagens para a sala {nome_sala}. Use '/voltar' para voltar.")
     while True:
-        time.sleep(0.5)
         entrada = input(f"[Você → SALA {nome_sala}]: ").strip()
         if entrada.upper() == "/VOLTAR":
             parar_evento.set()
             t.join()
+            sala_atual = None
             break
         elif entrada.upper() == "/SAIR":
             acao = "SAIR_SALA"
@@ -69,6 +74,8 @@ def abrir_chat_sala(nome_sala: str):
                     "CMD": acao,
                     "SALA": nome_sala
                 })
+            cache_salas[nome_sala] = {}
+            sala_atual = None
             parar_evento.set()
             t.join()
             print("Você saiu da sala.")
@@ -102,24 +109,18 @@ def abrir_chat_sala(nome_sala: str):
             salvar_mensagem_grupo(nome_sala, usuario_logado, entrada)
 
 def abrir_chat(usuario_chat: str):
-    global usuario_logado, chaves_peers_cache, cliente_socket
+    global usuario_logado, chaves_peers_cache, cliente_socket, chat_atual
 
+    chat_atual = usuario_chat
     pasta = f"chats/{usuario_logado}"
-    arquivo = os.path.join(pasta, f"chat_{usuario_chat}.txt")
+    caminho_arquivo = os.path.join(pasta, f"chat_{usuario_chat}.txt")
     parar_evento = threading.Event()
-    t = threading.Thread(target=monitorar_historico, args=(arquivo, parar_evento), daemon=True)
+    t = threading.Thread(target=monitorar_historico, args=(caminho_arquivo, parar_evento), daemon=True)
     t.start()
 
     print(f"\n📂 Abrindo conversa com {usuario_chat}...\n")
 
-    if os.path.exists(arquivo):
-        with open(arquivo, "r", encoding="utf-8") as f:
-            historico = f.read()
-            print("--- Histórico ---")
-            print(historico)
-            print("-----------------")
-    else:
-        print("Nenhum histórico salvo com esse usuário ainda.")
+    exibir_historico(caminho_arquivo)
 
     # Chat interativo
     print(f"\nDigite mensagens para {usuario_chat}. Digite '/voltar' para voltar ao menu.")
@@ -130,6 +131,7 @@ def abrir_chat(usuario_chat: str):
             print("💨 Saindo do chat.")
             parar_evento.set()
             t.join()
+            chat_atual = None
             break
         if not entrada:
             continue
@@ -181,7 +183,7 @@ def salvar_mensagem_grupo(sala: str, remetente: str, mensagem: str):
         f.write(f"[{agora}] {nome_remetente}: {mensagem}\n")
     
 def ouvinte_servidor():
-    global usuario_logado, chaves_peers_cache, chave_publica_servidor
+    global usuario_logado, chaves_peers_cache, chave_publica_servidor, chat_atual, sala_atual
 
     while True:
         if not cliente_socket:
@@ -202,11 +204,17 @@ def ouvinte_servidor():
             
             case "MSG_DIRETA":
                 mensagem = descriptografar_mensagem(resposta["PAYLOAD"], chave_privada)
+                if chat_atual != remetente:
+                    print(f"[MENSAGEM RECEBIDA] {remetente}\n")
                 salvar_mensagem_direta(usuario_logado, remetente, mensagem)
 
             case "MSG_SALA":
+                sala = resposta["SALA"]
                 mensagem = descriptografar_mensagem(resposta["PAYLOAD"], chave_privada)
-                salvar_mensagem_grupo(resposta["SALA"], remetente, mensagem)
+                if sala != sala_atual:
+                    print(f"[MENSAGEM RECEBIDA NA SALA] {sala}\n")
+
+                salvar_mensagem_grupo(sala, remetente, mensagem)
 
             case "ATUALIZACAO_SALA":
                 nome_sala = resposta["SALA"]
@@ -300,17 +308,19 @@ def formatar_comando_enviar_mensagem_sala(partes):
     else:
         return None
 
-def formatar_comando_criar_sala(partes):
-    if len(partes) < 2: return None
-    nome_sala = partes[1]
-    cache_salas[nome_sala] = {} 
-    return {"CMD": "CRIAR_SALA", "SALA": partes[1]}
+def formatar_comando_criar_sala(comando):
+    nome_sala = input("Nome da sala: ").strip()
+    senha_sala = input("Senha da sala: ").strip()
+    senha_cript = criptografar_mensagem( senha_sala, chave_publica_servidor)
+    cache_salas[nome_sala] = {}
+    return {"CMD": comando, "SALA": nome_sala, "SENHA": senha_cript}
 
-def formatar_comando_entrar_sala(partes):
-    if len(partes) < 2: return None
-    nome_sala = partes[1]
+def formatar_comando_entrar_sala(comando):
+    nome_sala = input("Nome da sala: ").strip()
+    senha_sala = input("Senha da sala: ").strip()
+    senha_cript = criptografar_mensagem(senha_sala, chave_publica_servidor)
     cache_salas[nome_sala] = {} 
-    return {"CMD": "ENTRAR_SALA", "SALA": nome_sala}
+    return {"CMD": comando, "SALA": nome_sala, "SENHA": senha_cript}
 
 def listar_chats():
     global usuario_logado
@@ -360,17 +370,18 @@ def executar_comando(client_socket, cmd_completo):
         case "ABRIR_CHAT_SALA":
             if len(partes) < 2:
                 print("Uso: ABRIR_CHAT_SALA <nome_da_sala>")
-            abrir_chat_sala(partes[1])
+            else:
+                abrir_chat_sala(partes[1])
         case "ABRIR_CHAT":
             if len(partes) < 2:
                 print("Uso: ABRIR_CHAT <nome_do_usuario>")
             else:
                 abrir_chat(partes[1])
         case "CRIAR_SALA":
-            comando_sala = formatar_comando_criar_sala(partes)
+            comando_sala = formatar_comando_criar_sala(comando)
             enviar_json(cliente_socket, comando_sala)
         case "ENTRAR_SALA":
-            comando_sala = formatar_comando_entrar_sala(partes)
+            comando_sala = formatar_comando_entrar_sala(comando)
             enviar_json(cliente_socket, comando_sala)
             
 def main():
@@ -395,15 +406,15 @@ def main():
         elif usuario_logado:
             print(f"\n--- Logado como: {usuario_logado} ---")
             print("Comandos disponíveis:")
-            print(" - LISTAR_PEERS           → Ver usuários online")
-            print(" - LISTAR_CHATS           → Ver seus chats salvos")
-            print(" - ABRIR_CHAT <usuario>   → Abrir chat direto com alguém")
-            print(" - ABRIR_CHAT_SALA <sala> → Abrir chat de uma sala")
-            print(" - MSG <usuario> <texto>  → Enviar mensagem direta")
-            print(" - CRIAR_SALA <nome>      → Criar uma nova sala")
-            print(" - ENTRAR_SALA <nome>     → Entrar em uma sala existente")
-            print(" - DESLOGAR               → Encerrar sua sessão")
-            print(" - SAIR                   → Sair do sistema\n")
+            print(" - LISTAR_PEERS              → Ver usuários online")
+            print(" - LISTAR_CHATS              → Ver seus chats salvos")
+            print(" - ABRIR_CHAT <usuario>      → Abrir chat direto com alguém")
+            print(" - ABRIR_CHAT_SALA <sala>    → Abrir chat de uma sala")
+            print(" - MSG <usuario> <texto>     → Enviar mensagem direta")
+            print(" - CRIAR_SALA                → Criar uma nova sala")
+            print(" - ENTRAR_SALA               → Entrar em uma sala existente")
+            print(" - DESLOGAR                  → Encerrar sua sessão")
+            print(" - SAIR                      → Sair do sistema\n")
         try:
             comando_input = input("> ").strip()
         except KeyboardInterrupt:
