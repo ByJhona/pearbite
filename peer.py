@@ -2,17 +2,11 @@ import socket
 import json
 import sys
 import threading
-import base64 # Importado para codificar o ciphertext para envio em JSON
-from util import criptografar_senha
+import base64 
+from util import receber_json, enviar_json, criptografar_mensagem, descriptografar_mensagem, gerar_par_chaves
 import os
 from datetime import datetime
 import time
-
-
-# --- SEÇÃO DE CRIPTOGRAFIA REAL ---
-# A biblioteca 'cryptography' é usada para as operações.
-from cryptography.hazmat.primitives.asymmetric import rsa, padding
-from cryptography.hazmat.primitives import hashes, serialization
 
 # --- Variáveis de Estado Globais ---
 usuario_logado = None
@@ -22,81 +16,10 @@ cache_salas = {}
 # As variáveis de chave agora armazenarão a chave real
 chave_privada = None
 chave_publica = None
+chave_publica_servidor = None
+
 chaves_peers_cache = {}
 
-
-def gerar_par_chaves():
-    """
-    Gera um par de chaves RSA (privada e pública).
-    A chave privada é mantida como um objeto e a pública é serializada para envio.
-    """
-    # Gera a chave privada
-    chave_privada = rsa.generate_private_key(
-        public_exponent=65537,
-        key_size=2048,
-    )
-    # Gera a chave pública correspondente
-    chave_publica = chave_privada.public_key()
-    
-    # Serializa a chave pública para o formato PEM para que possa ser enviada como texto
-    pem_chave_publica = chave_publica.public_bytes(
-        encoding=serialization.Encoding.PEM,
-        format=serialization.PublicFormat.SubjectPublicKeyInfo
-    )
-    
-    print("[INFO] Par de chaves RSA real gerado (2048 bits).")
-    # Retorna o objeto da chave privada e a string PEM da chave pública
-    return chave_privada, pem_chave_publica.decode('utf-8')
-
-def criptografar_mensagem(mensagem: str, pem_chave_publica_str: str):
-    """
-    Criptografa uma mensagem usando a chave pública (em formato PEM) de um destinatário.
-    """
-    try:
-        # Carrega a chave pública a partir da string PEM recebida
-        chave_publica = serialization.load_pem_public_key(
-            pem_chave_publica_str.encode('utf-8')
-        )
-        
-        # Criptografa a mensagem (convertida para bytes)
-        ciphertext = chave_publica.encrypt(
-            mensagem.encode('utf-8'),
-            padding.OAEP(
-                mgf=padding.MGF1(algorithm=hashes.SHA256()),
-                algorithm=hashes.SHA256(),
-                label=None
-            )
-        )
-        # Codifica o resultado em Base64 para transporte seguro dentro de um JSON
-        return base64.b64encode(ciphertext).decode('utf-8')
-    except Exception as e:
-        print(f"[ERRO DE CRIPTOGRAFIA] {e}")
-        return None
-
-def descriptografar_mensagem(payload_b64: str, chave_privada):
-    """
-    Descriptografa um payload (em Base64) usando a chave privada do próprio usuário.
-    """
-    try:
-        # Decodifica o Base64 para obter o ciphertext original em bytes
-        ciphertext = base64.b64decode(payload_b64)
-        
-        # Descriptografa o ciphertext usando a chave privada
-        plaintext = chave_privada.decrypt(
-            ciphertext,
-            padding.OAEP(
-                mgf=padding.MGF1(algorithm=hashes.SHA256()),
-                algorithm=hashes.SHA256(),
-                label=None
-            )
-        )
-        # Retorna a mensagem original como string
-        return plaintext.decode('utf-8')
-    except Exception as e:
-        print(f"\n[ERRO DE DECIFRAGEM] A mensagem pode estar corrompida ou não era para você. {e}")
-        return "[Mensagem não pôde ser decifrada]"
-
-# --- FIM DA SEÇÃO DE CRIPTOGRAFIA ---
 
 def monitorar_historico(arquivo, parar_evento):
     try:
@@ -223,19 +146,6 @@ def abrir_chat(usuario_chat: str):
             enviar_json(cliente_socket, msg)
             salvar_mensagem_direta(usuario_chat, usuario_logado, entrada)
 
-def enviar_json(sock, dados):
-    try:
-        sock.sendall(json.dumps(dados).encode())
-    except Exception as e:
-        print(f"[ERRO AO ENVIAR] {e}")
-
-def receber_json(sock):
-    try:
-        dados = sock.recv(2048)
-        return json.loads(dados.decode()) if dados else None
-    except Exception:
-        return None
-
 def criar_pasta_chat_usuario(usuario):
     pasta = f"chats/{usuario}"
     os.makedirs(pasta, exist_ok=True)
@@ -270,9 +180,8 @@ def salvar_mensagem_grupo(sala: str, remetente: str, mensagem: str):
     with open(arquivo, "a", encoding="utf-8") as f:
         f.write(f"[{agora}] {nome_remetente}: {mensagem}\n")
     
-    
 def ouvinte_servidor():
-    global usuario_logado, chaves_peers_cache
+    global usuario_logado, chaves_peers_cache, chave_publica_servidor
 
     while True:
         if not cliente_socket:
@@ -287,6 +196,10 @@ def ouvinte_servidor():
         remetente = resposta.get("REMETENTE")
 
         match status:
+            case "CHAVE_PUBLICA":
+                chave_publica_servidor = resposta.get("CHAVE_PUBLICA")
+                print("[CLIENT] SUCESSO AO ATRIBUIR CHAVE PUBLICA DO SERVIDOR") if chave_publica_servidor != None else print("[CLIENT] ERRO AO ATRIBUIR CHAVE PUBLICA DO SERVIDOR")
+            
             case "MSG_DIRETA":
                 mensagem = descriptografar_mensagem(resposta["PAYLOAD"], chave_privada)
                 salvar_mensagem_direta(usuario_logado, remetente, mensagem)
@@ -318,6 +231,7 @@ def ouvinte_servidor():
 
             case "LOGIN_REALIZADO":
                 usuario_logado = resposta.get("NOME")
+                print("[CLIENT] LOGIN REALIZADO")
                 criar_pasta_chat_usuario(usuario_logado)
 
             case "OK" if "PEERS" in resposta:
@@ -336,7 +250,6 @@ def ouvinte_servidor():
             case _:
                 print(f"\n[SERVIDOR/DESCONHECIDO]: {json.dumps(resposta)}")
 
-
 def conectar_servidor():
     try:
         cliente = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -346,14 +259,14 @@ def conectar_servidor():
         print(f"[ERRO] Não foi possível conectar ao servidor: {e}")
         return None
 
-def formatar_comando_login_cadastro(partes):
-    comando = partes[0].upper()
+def formatar_comando_login_cadastro(comando:str):
     nome = input("Nome de usuário: ").strip()
     senha = input("Senha: ").strip()
-    senha_criptografada = criptografar_senha(senha)
+    senha_criptografada = criptografar_mensagem(senha, chave_publica_servidor)
+    nome_criptogradado = criptografar_mensagem(nome, chave_publica_servidor)
     if comando == "LOGIN":
-        return {"CMD":comando, "NOME": nome, "SENHA": senha_criptografada, "CHAVE_PUBLICA": chave_publica}
-    return {"CMD":comando, "NOME": nome, "SENHA": senha_criptografada}
+        return {"CMD":comando, "NOME": nome_criptogradado, "SENHA": senha_criptografada, "CHAVE_PUBLICA": chave_publica}
+    return {"CMD":comando, "NOME": nome_criptogradado, "SENHA": senha_criptografada, "CHAVE_PUBLICA": chave_publica}
 
 def formatar_comando_enviar_mensagem(partes):
     if len(partes) < 3: return None
@@ -375,7 +288,6 @@ def formatar_comando_deslogar(partes):
     usuario_logado = None
     return {"CMD": comando, "NOME": nome}
     
-
 def formatar_comando_enviar_mensagem_sala(partes):
     if len(partes) < 3: return None
     destinatario, texto = partes[1], " ".join(partes[2:])
@@ -432,7 +344,7 @@ def executar_comando(client_socket, cmd_completo):
         
     match comando:
         case "LOGIN" | "CADASTRAR":
-            comando_cifrado = formatar_comando_login_cadastro(partes)
+            comando_cifrado = formatar_comando_login_cadastro(comando)
             enviar_json(client_socket, comando_cifrado)
         case "DESLOGAR":
             comando = formatar_comando_deslogar(partes)
@@ -461,8 +373,6 @@ def executar_comando(client_socket, cmd_completo):
             comando_sala = formatar_comando_entrar_sala(partes)
             enviar_json(cliente_socket, comando_sala)
             
-
-
 def main():
     global cliente_socket, usuario_logado, chave_privada, chave_publica
     # Gera o par de chaves real na inicialização

@@ -1,0 +1,2 @@
+{"NOME": "jhon", "SENHA": "$2b$12$HErgylOGiydNCn3xddK0KOjChM0DMIfWB6Ji8Saq0trwRT8VVm13u"}
+{"NOME": "lari", "SENHA": "$2b$12$Pxm3jpUP3K0uMOLop/qc0OTbFsENvtHIZqdd3PD6zx6kls/N5Pe76"}

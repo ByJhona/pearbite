@@ -2,12 +2,14 @@ from threading import Thread
 from socket import socket, AF_INET, SOCK_STREAM
 import json
 from gerenciadorUsuario import GerenciadorUsuarios
-from util import receber_json, enviar_json
+from util import receber_json, enviar_json, gerar_par_chaves, descriptografar_mensagem, criptografar_mensagem
 
 # ESTRUTURAS DE DADOS AMPLIADAS
 usuarios_ativos = {} # Mantém informações de conexão dos usuários
-chaves_publicas = {} # Armazena a chave pública de cada usuário
 salas = {} # Dicionário para gerenciar salas e seus membros: {"nome_sala": ["user1", "user2"]}
+
+chave_privada = None
+chave_publica = None
 
 def configurar_servidor(porta) -> socket:
     servSocket = socket(AF_INET, SOCK_STREAM)
@@ -17,14 +19,12 @@ def configurar_servidor(porta) -> socket:
     return servSocket
 
 def deslogar_usuario(endereco):
-    global usuarios_ativos, chaves_publicas, salas
+    global usuarios_ativos, salas
     nome_usuario_deslogado = None
     for nome, info in list(usuarios_ativos.items()):
         if info['ENDERECO'] == endereco:
             nome_usuario_deslogado = nome
             del usuarios_ativos[nome]
-            if nome in chaves_publicas:
-                del chaves_publicas[nome]
             break
     
     # Remove o usuário de qualquer sala em que ele esteja
@@ -49,9 +49,9 @@ def broadcast_atualizacao_sala(nome_sala):
         for membro_destino in membros_da_sala:
             # Prepara uma lista personalizada para cada membro, contendo os outros
             outros_membros_info = [
-                {"usuario": u, "chave": chaves_publicas.get(u)}
+                {"usuario": u, "chave": usuarios_ativos[u]["CHAVE_PUBLICA"]}
                 for u in membros_da_sala
-                if u != membro_destino and u in chaves_publicas
+                if u != membro_destino and u in usuarios_ativos
             ]
             
             # Monta e envia a mensagem de atualização para o membro de destino
@@ -59,9 +59,10 @@ def broadcast_atualizacao_sala(nome_sala):
                 msg_atualizacao = {"STATUS": "ATUALIZACAO_SALA", "MEMBROS": outros_membros_info, "SALA": nome_sala}
                 enviar_json(usuarios_ativos[membro_destino]['CONEXAO'], msg_atualizacao)
 
-def lidar_requisicao(conexao: socket, endereco, gerenciadorUsuarios: GerenciadorUsuarios):
+def lidar_requisicao(conexao: socket, endereco,gerenciadorUsuarios: GerenciadorUsuarios):
+    global usuarios_ativos, salas, chave_privada, chave_publica
+    enviar_json(conexao, {"STATUS":"CHAVE_PUBLICA", "CHAVE_PUBLICA":chave_publica})
     print(f"Conexão iniciada com {endereco}")
-    global usuarios_ativos, chaves_publicas, salas
     nome_usuario_thread = None
 
     try:
@@ -74,11 +75,13 @@ def lidar_requisicao(conexao: socket, endereco, gerenciadorUsuarios: Gerenciador
 
             match operacao:
                 case 'LOGIN':
-                    nome, senha, chave_publica = json_recebido.get('NOME'), json_recebido.get('SENHA'), json_recebido.get('CHAVE_PUBLICA')
+                    nome_cript, senha_cript, chave_publica_peer = json_recebido.get('NOME'), json_recebido.get('SENHA'), json_recebido.get('CHAVE_PUBLICA')
+                    nome = descriptografar_mensagem(nome_cript, chave_privada)
+                    senha = descriptografar_mensagem(senha_cript, chave_privada)
+                    
                     if gerenciadorUsuarios.login(nome, senha):
                         nome_usuario_thread = nome
-                        usuarios_ativos[nome] = {'ENDERECO': endereco, 'CONEXAO': conexao}
-                        chaves_publicas[nome] = chave_publica
+                        usuarios_ativos[nome] = {'ENDERECO': endereco, 'CONEXAO': conexao, "CHAVE_PUBLICA": chave_publica_peer }
                         enviar_json(conexao, {"STATUS": "LOGIN_REALIZADO", "NOME": nome})
                     else:
                         enviar_json(conexao, {"STATUS": "LOGIN_FALHOU"})
@@ -87,13 +90,16 @@ def lidar_requisicao(conexao: socket, endereco, gerenciadorUsuarios: Gerenciador
                     if json_recebido.get('NOME') in usuarios_ativos: break
 
                 case 'CADASTRAR':
-                    nome, senha = json_recebido.get('NOME'), json_recebido.get('SENHA')
+                    nome_cript_peer, senha_cript_peer = json_recebido.get('NOME'), json_recebido.get('SENHA')
+                    nome = descriptografar_mensagem(nome_cript_peer, chave_privada)
+                    senha = descriptografar_mensagem(senha_cript_peer, chave_privada)
+
                     status = "CADASTRO_REALIZADO" if gerenciadorUsuarios.cadastrar(nome, senha) else "CADASTRO_FALHOU"
                     enviar_json(conexao, {"STATUS": status, "NOME":nome})
 
                 case 'LISTAR_PEERS':
                     if not usuario_logado: continue
-                    lista = [{"usuario": n, "chave": chaves_publicas.get(n)} for n in usuarios_ativos if n != usuario_logado]
+                    lista = [{"usuario": n, "chave": usuarios_ativos[n]["CHAVE_PUBLICA"]} for n in usuarios_ativos if n != usuario_logado]
                     enviar_json(conexao, {"STATUS": "OK", "PEERS": lista})
 
                 case 'LISTAR_SALAS':
@@ -116,6 +122,7 @@ def lidar_requisicao(conexao: socket, endereco, gerenciadorUsuarios: Gerenciador
                 case 'CRIAR_SALA':
                     if not usuario_logado: continue
                     nome_sala = json_recebido.get('SALA')
+                    senha_sala = json_recebido.get('SENHA')
                     if nome_sala in salas:
                         enviar_json(conexao, {"STATUS": "ERRO", "MENSAGEM": "Sala já existe."})
                     else:
@@ -188,7 +195,6 @@ def lidar_requisicao(conexao: socket, endereco, gerenciadorUsuarios: Gerenciador
                     break
             
             if nome_usuario_thread in usuarios_ativos: del usuarios_ativos[nome_usuario_thread]
-            if nome_usuario_thread in chaves_publicas: del chaves_publicas[nome_usuario_thread]
             
             if sala_do_usuario: broadcast_atualizacao_sala(sala_do_usuario)
         
@@ -196,6 +202,8 @@ def lidar_requisicao(conexao: socket, endereco, gerenciadorUsuarios: Gerenciador
         print(f"Conexão encerrada com {endereco}")
 
 def iniciar_servidor():
+    global chave_privada, chave_publica
+    chave_privada, chave_publica = gerar_par_chaves()
     servidor = configurar_servidor(12001)
     gerenciadorUsuarios = GerenciadorUsuarios()
 
