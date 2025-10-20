@@ -14,3 +14,4 @@ class Usuario:
         usuario = Usuario(dados["NOME"], "")
         usuario.senha_criptografada = dados["SENHA"]
         return usuario
+        
