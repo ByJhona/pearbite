@@ -4,6 +4,7 @@ import base64
 from cryptography.hazmat.primitives.asymmetric import rsa, padding
 from cryptography.hazmat.primitives import hashes, serialization
 
+
 def gerar_par_chaves():
     """
     Gera um par de chaves RSA (privada e pública).
