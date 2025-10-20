@@ -4,6 +4,7 @@ RELATÓRIO TÉCNICO - PEARBITE CHAT P2P
 
 O sistema PearBite possui 3 componentes principais:
 
+
 1.1 Servidor Tracker (tracker.py)
 - Mantém registro central de usuários e salas
 - Gerencia autenticação e descoberta de peers
